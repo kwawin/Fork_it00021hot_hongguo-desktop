@@ -1,0 +1,53 @@
+name: Auto Sync All Branches
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # 每 6 小时自动同步一次，可根据需要修改
+  workflow_dispatch: # 允许在 GitHub 网页上手动触发同步
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 赋予 Actions 写入仓库的权限
+    steps:
+      - name: Checkout Fork Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set Git Config
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync All Upstream Branches
+        run: |
+          # 1. 添加原仓库为 upstream 远程源
+          git remote add upstream https://github.com/it00021hot/hongguo-desktop.git
+          git fetch upstream --prune
+
+          # 2. 循环遍历 upstream 的所有分支并同步
+          for remote_branch in $(git branch -r | grep "upstream/" | grep -v "HEAD"); do
+            branch_name=${remote_branch#upstream/}
+            echo "-----------------------------------"
+            echo "Syncing branch: $branch_name"
+
+            # 切换或创建对应分支
+            if git show-ref --verify --quiet refs/heads/$branch_name; then
+              git checkout $branch_name
+            else
+              git checkout -b $branch_name $remote_branch
+            fi
+
+            # 尝试自动合并 upstream 的更新
+            git merge --no-edit $remote_branch || {
+              echo "Merge conflict on branch $branch_name, aborting merge..."
+              git merge --abort
+              continue
+            }
+
+            # 推送到你的 Fork 仓库
+            git push origin $branch_name || echo "Failed to push $branch_name"
+          done
